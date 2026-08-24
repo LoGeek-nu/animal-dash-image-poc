@@ -6,4 +6,6 @@ output/*
 !output/.gitkeep
 samples/*
 !samples/.gitkeep
+archive/*
+!archive/.gitkeep
 .mise/
