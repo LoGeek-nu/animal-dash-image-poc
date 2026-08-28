@@ -7,10 +7,11 @@ Design doc pipeline (see project notes):
   絵の周囲だけcrop -> 透過PNG
 
 台紙デザイン（アニマルダッシュの実際の台紙）には、描画エリアを囲む太い罫線の枠が
-印刷されている。紙全体の外周（机との境目）を検出するより、この枠自体を検出する方が
-机の色・照明・影などの環境要因に左右されず安定する。タイトル文字やスタッフ向け説明、
-ニックネーム欄なども同じ濃色インクで写り込むが、それらは枠に比べて面積が大幅に小さい
-ため、「一定面積以上かつ最大の輪郭」を選ぶことで自然に無視できる。
+印刷されている。枠の外側（タイトル文字、スタッフ向け説明、机の陰など）は暗い要素が
+枠自体と地続きに写り込むことがあり、枠の外側輪郭だけを見ると誤ってそれらと合体した
+形を検出してしまう。そのため枠の外側ではなく、枠というリングの内側にできる「穴」
+（＝描画エリアの紙面そのもの）を検出する。穴は枠の外に何が写っていようと影響を
+受けない独立した領域なので、より安定して描画エリアだけを切り出せる。
 """
 
 from __future__ import annotations
@@ -38,14 +39,16 @@ def find_frame_corners(
     dark_thresh: int = 120,
     min_area_ratio: float = 0.15,
 ) -> np.ndarray | None:
-    """Locate the printed drawing-frame border and return its 4 outer corners.
+    """Locate the printed drawing-frame's interior and return its 4 inner corners.
 
     Thresholds for "dark ink" rather than running generic Canny edge detection,
     so stray edges from desk texture/background don't compete with the frame.
-    Picks the largest dark closed contour above `min_area_ratio` of the image,
-    which is robust against smaller same-colored elements on the sheet (title
-    text, staff instructions, nickname box, etc.) since the frame is by far
-    the biggest one.
+    The frame is a closed ring, so instead of taking its *outer* contour
+    (which merges with whatever dark clutter touches it from outside — title
+    text, staff instructions, desk shadow — into one wrong blob), this looks
+    at the *hole* enclosed by the ring: the drawing area itself. That hole is
+    unaffected by anything outside the ring, so it isolates the frame's
+    interior reliably regardless of what else is dark in the photo.
     """
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -56,26 +59,31 @@ def find_frame_corners(
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     closed = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
+    # RETR_CCOMP yields 2-level hierarchy info so holes (contours with a parent)
+    # can be told apart from the dark blobs that enclose them.
+    contours, hierarchy = cv2.findContours(closed, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours or hierarchy is None:
         return None
 
     image_area = image_bgr.shape[0] * image_bgr.shape[1]
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    holes = [c for c, h in zip(contours, hierarchy[0]) if h[3] != -1]
+    if not holes:
+        return None
+    holes.sort(key=cv2.contourArea, reverse=True)
 
-    for contour in contours[:5]:
-        area = cv2.contourArea(contour)
+    for hole in holes[:5]:
+        area = cv2.contourArea(hole)
         if area < image_area * min_area_ratio:
             continue
-        perimeter = cv2.arcLength(contour, True)
+        perimeter = cv2.arcLength(hole, True)
         # Larger epsilon than a sharp-corner rectangle needs, since the frame's
         # rounded corners otherwise approximate to >4 vertices.
-        approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
+        approx = cv2.approxPolyDP(hole, 0.04 * perimeter, True)
         if len(approx) == 4 and cv2.isContourConvex(approx):
             return approx.reshape(4, 2).astype(np.float32)
 
-    # Fallback: rotated bounding rect of the largest sufficiently-big contour.
-    largest = contours[0]
+    # Fallback: rotated bounding rect of the largest sufficiently-big hole.
+    largest = holes[0]
     if cv2.contourArea(largest) < image_area * min_area_ratio:
         return None
     rect = cv2.minAreaRect(largest)
@@ -115,13 +123,14 @@ def warp_perspective(image_bgr: np.ndarray, corners: np.ndarray) -> np.ndarray:
     return cv2.warpPerspective(image_bgr, matrix, (width, height))
 
 
-def strip_frame_border(image_bgr: np.ndarray, inset_ratio: float = 0.03) -> np.ndarray:
-    """Crop inward slightly after warping to drop the printed frame's border stroke itself.
+def strip_frame_border(image_bgr: np.ndarray, inset_ratio: float = 0.01) -> np.ndarray:
+    """Crop inward slightly after warping, as a safety margin against the frame's ink.
 
-    `find_frame_corners` returns the frame's *outer* edge, so the warped image's
-    boundary pixels are the dark border line, not paper background. Left as-is,
-    `build_ink_mask` would treat that border as "ink" and it would survive
-    `crop_to_content` as an unwanted colored ring around the character.
+    `find_frame_corners` now returns the frame's *inner* edge (see its docstring),
+    so the warped image's boundary should already be paper, not border ink. This
+    small inset only guards against threshold/blur jitter in that edge detection
+    leaving a sliver of ink behind, which `build_ink_mask` would otherwise treat
+    as "ink" and let survive `crop_to_content` as an unwanted colored ring.
     """
     h, w = image_bgr.shape[:2]
     dy, dx = int(h * inset_ratio), int(w * inset_ratio)
