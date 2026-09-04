@@ -25,3 +25,7 @@ run = "python -m animal_dash_image_poc.cli preprocess samples/dragon.png -o outp
 [tasks.run-all]
 description = "Run the full pipeline (preprocess + Gemini status) on every image in samples/"
 run = "python scripts/run_all.py"
+
+[tasks.api]
+description = "Run the HTTP API (app.py, same entrypoint Vercel uses) locally with auto-reload"
+run = "uv pip install -e '.[dev]' && uvicorn app:app --reload --port 8000"
