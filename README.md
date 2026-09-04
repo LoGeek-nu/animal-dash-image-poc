@@ -167,6 +167,51 @@ mise run run-all
 | Geminiの判定内容・文面を変えたい | `prompts/character_status.md` を直接編集するだけでOK（コード変更不要） |
 | ステータスの合計値やレンジを変えたい | `gemini_status.py` の `STAT_TOTAL` とスキーマ |
 
+## HTTP API（Vercelへデプロイして常時稼働させる用）
+
+`app.py`は、CLIと同じ`pipeline.run_full_pipeline`を呼び出すFastAPIのエントリーポイント。
+animal-dashのCloudflare Worker側からサーバー間で呼び出される想定で、ブラウザから直接
+叩かれることは想定していない（`API_SHARED_SECRET`はブラウザに一切露出させないこと）。
+
+### ローカルで動かす
+
+```bash
+mise run api
+# mise が無い場合: pip install -e '.[dev]' && uvicorn app:app --reload --port 8000
+```
+
+`.env`に`GEMINI_API_KEY`と`API_SHARED_SECRET`（任意の文字列でよい、ローカル確認用）を
+設定してから起動する。
+
+### エンドポイント
+
+| メソッド/パス | 内容 |
+|---|---|
+| `GET /health` | 死活監視用 |
+| `POST /v1/characters/generate` | `multipart/form-data`で`image`ファイルを送ると、透過PNG（base64）とステータスJSONを返す。`X-API-Key`ヘッダーに`API_SHARED_SECRET`と同じ値が必要 |
+
+```bash
+curl -X POST http://localhost:8000/v1/characters/generate \
+  -H "X-API-Key: <API_SHARED_SECRETと同じ値>" \
+  -F "image=@samples/dragon.png"
+```
+
+失敗時は`{"error": "...", "retryable": true|false}`を返す。`retryable: true`は
+Gemini側の一時的な失敗（`503`など）やタイムアウトを想定しており、少し待って
+再送すれば成功する可能性がある。`retryable: false`はサーバー側の設定不備
+（`API_SHARED_SECRET`未設定など）で、再送しても直らない。
+
+同時実行数は`CONCURRENCY_LIMIT`（既定4、Geminiの無料枠を想定した目安値）を超えると
+`429`を返す。ただしVercel上で複数インスタンスが並行起動した場合、この上限は
+インスタンスごとの目安であり、全体としての厳密な上限にはならない点に注意。
+
+### Vercelへのデプロイ
+
+Vercelは`app.py`をPythonのエントリーポイントとして自動検出する（zero-config）。
+プロジェクト作成後、環境変数に`GEMINI_API_KEY`と`API_SHARED_SECRET`を設定すること。
+`vercel.json`で`samples/` / `output/` / `archive/` / `scripts/`をデプロイ対象から除外し、
+バンドルサイズを抑えている。
+
 ## 検証したいこと / 既知の制約
 
 - [ ] 実際の台紙（枠付き）を撮影し、`find_frame_corners` / `build_ink_mask` の
@@ -180,6 +225,7 @@ mise run run-all
 ## 構成
 
 ```
+app.py                  # HTTP APIエントリポイント（Vercelが読み込む）
 src/animal_dash_image_poc/
   preprocessing.py   # OpenCV: 紙検出・台形補正・影補正・背景透過・crop・padding
   gemini_status.py   # Gemini API: 特徴・ステータスJSON生成
