@@ -9,3 +9,7 @@ samples/*
 archive/*
 !archive/.gitkeep
 .mise/
+.vercel
+.env*
+!.env.example
+_uv/

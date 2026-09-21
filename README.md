@@ -226,7 +226,7 @@ Vercelは`app.py`をPythonのエントリーポイントとして自動検出す
 
 ```
 app.py                  # HTTP APIエントリポイント（Vercelが読み込む）
-src/animal_dash_image_poc/
+animal_dash_image_poc/
   preprocessing.py   # OpenCV: 紙検出・台形補正・影補正・背景透過・crop・padding
   gemini_status.py   # Gemini API: 特徴・ステータスJSON生成
   pipeline.py         # 上記をつなぐオーケストレーション
