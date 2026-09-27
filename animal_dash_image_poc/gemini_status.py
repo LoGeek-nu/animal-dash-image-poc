@@ -14,7 +14,7 @@ DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 STAT_TOTAL = 30
 
 # プロンプト文面はコードと分けて prompts/ に置き、文面だけ調整できるようにする。
-PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "character_status.md"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "character_status.md"
 
 RESPONSE_SCHEMA = {
     "type": "object",
