@@ -18,7 +18,7 @@
 
 余白処理・背景透過は OpenCV でローカル処理し、AIには単純な余白除去をさせない方針。
 AI（Gemini）には透過済みの画像を見せて、動物の特徴やゲーム用ステータス
-（speed / jump / power、称号など）を判定させる。
+（speed / acceleration / stamina、称号・キャッチコピーなど）を判定させる。
 
 ## セットアップ
 
@@ -137,8 +137,8 @@ python -m animal_dash_image_poc.cli run samples/<ファイル名> -o output/<名
 ```
 
 - `output/<名前>.png` … 透過PNG（手順2と同じ）
-- `output/<名前>.json` … `animal_type` / `features` / `personality` / `title` / `stats`
-  （speed・jump・powerの合計が30になっているか、内容が不自然でないかを確認）
+- `output/<名前>.json` … `animal_type` / `features` / `personality` / `title` / `catchphrase` / `stats`
+  （speed・acceleration・staminaが各1〜20で合計40になっているか、内容が不自然でないかを確認）
 
 **注意：`status`サブコマンド単体だとファイルに保存されず標準出力に表示されるだけ。**
 JSONを残したい場合は必ず`run`サブコマンドを使う。
@@ -165,7 +165,7 @@ mise run run-all
 | 輪郭の内側の色が透過で消える | `preprocessing.py` の `build_ink_mask`（`gap_close_ratio`を上げると輪郭の隙間をより強く塞げる） |
 | 枠線の縁が透過画像に残る | `preprocessing.py` の `strip_frame_border`（`inset_ratio`） |
 | Geminiの判定内容・文面を変えたい | `prompts/character_status.md` を直接編集するだけでOK（コード変更不要） |
-| ステータスの合計値やレンジを変えたい | `gemini_status.py` の `STAT_TOTAL` とスキーマ |
+| ステータスの合計値やレンジを変えたい | `gemini_status.py` の `STAT_TOTAL` / `STAT_MIN` / `STAT_MAX` とスキーマ |
 
 ## HTTP API（Vercelへデプロイして常時稼働させる用）
 

@@ -11,7 +11,10 @@ from google.genai import types
 
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
-STAT_TOTAL = 30
+STAT_TOTAL = 40
+STAT_MIN = 1
+STAT_MAX = 20
+STAT_KEYS = ("speed", "acceleration", "stamina")
 
 # プロンプト文面はコードと分けて prompts/ に置き、文面だけ調整できるようにする。
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "character_status.md"
@@ -26,19 +29,18 @@ RESPONSE_SCHEMA = {
             "description": "見た目の特徴を短い単語で3〜5個",
         },
         "personality": {"type": "string", "description": "性格を一言で"},
-        "title": {"type": "string", "description": "短い称号（例: 韋駄天のうさぎ）"},
+        "title": {"type": "string", "description": "短い称号（全角8文字以内。例: 韋駄天のうさぎ）"},
+        "catchphrase": {"type": "string", "description": "一言のキャッチコピー（全角14文字以内）"},
         "stats": {
             "type": "object",
             "properties": {
-                "speed": {"type": "integer"},
-                "jump": {"type": "integer"},
-                "power": {"type": "integer"},
+                k: {"type": "integer", "minimum": STAT_MIN, "maximum": STAT_MAX} for k in STAT_KEYS
             },
-            "required": ["speed", "jump", "power"],
+            "required": list(STAT_KEYS),
         },
         "notes": {"type": "string", "description": "判定に関する補足（任意）"},
     },
-    "required": ["animal_type", "features", "personality", "title", "stats"],
+    "required": ["animal_type", "features", "personality", "title", "catchphrase", "stats"],
 }
 
 def load_prompt() -> str:
@@ -83,8 +85,17 @@ def generate_status(image_path: str, api_key: str | None = None, model: str = DE
 
 
 def _validate_stats(data: dict) -> None:
+    # 値は書き換えず警告だけ残す（範囲・合計の補正は animal-dash 側で行う）。
     stats = data.get("stats", {})
-    total = sum(int(stats.get(k, 0)) for k in ("speed", "jump", "power"))
+    values = {k: int(stats.get(k, 0)) for k in STAT_KEYS}
     data.setdefault("notes", "")
+    warnings = [
+        f"stats.{k}={v} out of range {STAT_MIN}-{STAT_MAX}"
+        for k, v in values.items()
+        if not STAT_MIN <= v <= STAT_MAX
+    ]
+    total = sum(values.values())
     if total != STAT_TOTAL:
-        data["notes"] = (data.get("notes") or "") + f" [warning: stats total={total}, expected {STAT_TOTAL}]"
+        warnings.append(f"stats total={total}, expected {STAT_TOTAL}")
+    for w in warnings:
+        data["notes"] = (data.get("notes") or "") + f" [warning: {w}]"
