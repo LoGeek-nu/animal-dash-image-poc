@@ -65,16 +65,29 @@ def find_frame_corners(
     if not contours or hierarchy is None:
         return None
 
-    image_area = image_bgr.shape[0] * image_bgr.shape[1]
-    holes = [c for c, h in zip(contours, hierarchy[0]) if h[3] != -1]
+    img_h, img_w = image_bgr.shape[:2]
+    image_area = img_h * img_w
+
+    def touches_border(contour: np.ndarray) -> bool:
+        x, y, w, h = cv2.boundingRect(contour)
+        return x <= 1 or y <= 1 or x + w >= img_w - 1 or y + h >= img_h - 1
+
+    # When the sheet is photographed on a dark desk, the whole white sheet is
+    # itself a "hole" in the dark desk region, and it's bigger than the frame's
+    # interior (and also 4-cornered). The desk blob enclosing it reaches the
+    # image border, while the printed frame ring never does, so holes whose
+    # parent touches the border are tried last.
+    holes = [
+        (c, touches_border(contours[h[3]]))
+        for c, h in zip(contours, hierarchy[0])
+        if h[3] != -1 and cv2.contourArea(c) >= image_area * min_area_ratio
+    ]
     if not holes:
         return None
-    holes.sort(key=cv2.contourArea, reverse=True)
+    holes.sort(key=lambda item: (item[1], -cv2.contourArea(item[0])))
+    holes = [c for c, _ in holes]
 
     for hole in holes[:5]:
-        area = cv2.contourArea(hole)
-        if area < image_area * min_area_ratio:
-            continue
         perimeter = cv2.arcLength(hole, True)
         # Larger epsilon than a sharp-corner rectangle needs, since the frame's
         # rounded corners otherwise approximate to >4 vertices.
@@ -82,11 +95,8 @@ def find_frame_corners(
         if len(approx) == 4 and cv2.isContourConvex(approx):
             return approx.reshape(4, 2).astype(np.float32)
 
-    # Fallback: rotated bounding rect of the largest sufficiently-big hole.
-    largest = holes[0]
-    if cv2.contourArea(largest) < image_area * min_area_ratio:
-        return None
-    rect = cv2.minAreaRect(largest)
+    # Fallback: rotated bounding rect of the best-ranked sufficiently-big hole.
+    rect = cv2.minAreaRect(holes[0])
     return cv2.boxPoints(rect).astype(np.float32)
 
 
